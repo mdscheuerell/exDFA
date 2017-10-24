@@ -28,9 +28,44 @@ $$
 \boldsymbol{\gamma}_t \sim \text{MVN}(\boldsymbol{\gamma}_{t-1},\mathbf{Q}).
 $$
 
+## Simulated data
+
+Here are some simulated data for 5 time series with 30 measurements each based upon 2 latent factors. The observation variances are also unequal.
+
+\vspace{0.15in}
+
+```{r sim_data, size="small"}
+set.seed(123)
+## matrix dims
+nn <- 5
+mm <- 2
+tt <- 30
+## zero-mean latent factors
+x1 <- cumsum(rnorm(tt, 0, 1))
+x1 <- x1 - mean(x1)
+x2 <- cumsum(rnorm(tt, 0, 1))
+x2 <- x2 - mean(x2)
+## factor loadings
+zvals <- c(0.2, 0.9,
+           0.4, 0.7,
+           0.6, 0.5,
+           0.8, 0.3,
+           1.0, 0.1)
+ZZ <- matrix(zvals, nn, mm, byrow=TRUE)
+## covariance matrix for observation errors
+RR <- diag(seq(1,5)/5)
+## observation errors
+vv <- t(MASS::mvrnorm(tt, matrix(0,nn,1), RR))
+## simulated data
+yy <- ZZ %*% rbind(x1,x2) + vv
+## subtract mean
+yy <- t(scale(t(yy), scale=FALSE))
+```
+
+
 ## Fitting the model
 
-For this example, we make use of the **MARSS** package (Holmes et al. 2012) for **R** to estimate the parameters in the DFA model. The notation of Holmes et al. is somewhat different than ours, however, so we must write out our DFA model in a form that the `MARSS` function will understand based on the following specification of a state-space model:
+For this example, we make use of the **MARSS** package (Holmes et al. 2012) for **R** to estimate the parameters in the DFA model. The notation of Holmes et al. is somewhat different than ours, however, so we must write out our DFA model in a form based on the following specification of a state-space model:
 
 $$
 \begin{gathered}
@@ -39,31 +74,26 @@ $$
  \end{gathered}.   
 $$
 
-Thus, we will need to define $\mathbf{a} = \boldsymbol{\alpha}$, $\boldsymbol{\gamma}_t = \mathbf{x}_t$, $\boldsymbol{\Phi} = \mathbf{R}$, $\mathbf{u} = \mathbf{0}$, and $\mathbf{B} = \mathbf{I}$.
+Thus, we will need to define $\mathbf{a} = \boldsymbol{\alpha}$, $\boldsymbol{\gamma}_t = \mathbf{x}_t$, $\boldsymbol{\Phi} = \mathbf{R}$, $\mathbf{u} = \mathbf{0}$, and $\mathbf{B} = \mathbf{I}$. Furthermore, estimating the mean vector $\mathbf{a}$ is often difficult, so we will instead substract the mean from the data before fitting and set $\mathbf{a} = \mathbf{0}$. Note that this will not affect our estimates of the factors and their loadings.
 
 The `MARSS` function makes use of list matrices, which allow one to mix character and numeric classes within the same matrix. Any values of class `character` are interpreted as parameters to be estimated; anything `numeric` is fixed at its value.
 
 \vspace{0.15in}
 
-```{r mar, size="small", cache=TRUE}
+```{r fit_dfa, size="small", results="hide"}
 library(MARSS)
-## matrix dims
-nn <- 5
-mm <- 3
 ## model list
 mod_list <- list(
   ## observation eqn
+  A = matrix(0,nn,1),        # zero vector
   Z = matrix(list(0),nn,mm), # all 0's for now
-  A = matrix(list(0),nn,1),  # all 0's for now
   R = matrix(list(0),nn,nn), # all 0's for now
   ## state eqn
-  B = diag(mm),              # identity matrix
   U = matrix(0,mm,1),        # zero vector
+  B = diag(mm),              # identity matrix
   Q = diag(mm)               # identity matrix
 )
 ## specify observation parameters
-## last n-m values of A are non-zero
-mod_list$A[(mm+1):nn] <- as.character(seq(mm+1,nn))
 ## upper right corner of Z stays zero
 for(cc in 1:mm) {
   for(rr in cc:nn) {
@@ -72,8 +102,77 @@ for(cc in 1:mm) {
 }
 ## R is diagonal and unequal
 diag(mod_list$R) <- paste0(seq(nn),seq(nn))
-mod_list
-#mod1 <- MARSS(rbind(x1, x2), model=mod_list, inits=list(x0=matrix(0,2,1)))
+## fit the model
+dfa <- MARSS(yy, model=mod_list, inits=list(x0=matrix(0,2,1)))
 ```
 
+## Factor rotations
+
+For this example we will use a varimax rotation of the factors and loadings, where we seek an $m \times m$ non-singular rotation matrix $\mathbf{H}$, such that the following state-space forms of our DFA models are equivalent:
+
+$$
+\begin{gathered}
+ \mathbf{y}_t = \mathbf{L} \boldsymbol{\gamma}_t + \boldsymbol{\alpha} +\mathbf{v}_t \\
+ \boldsymbol{\gamma}_t = \boldsymbol{\gamma}_{t-1} + \mathbf{w}_t
+\end{gathered}   
+$$
+
+and
+
+$$
+\begin{gathered}
+ \mathbf{y}_t = \mathbf{L}\mathbf{H}^{-1} \boldsymbol{\gamma}_t + \boldsymbol{\alpha} + \mathbf{v}_t \\
+ \mathbf{H} \boldsymbol{\gamma}_t = \mathbf{H} \boldsymbol{\gamma}_{t-1} + \mathbf{H} \mathbf{w}_t
+\end{gathered}.
+$$
+
+This is easily done in **R** via the `varimax` function:
+
+\vspace{0.15in}
+
+```{r varimax, size="small"}
+## inverse of the rotation matrix
+H_inv <- varimax(coef(dfa, type="matrix")$Z)$rotmat
+## rotate factor loadings
+Z_rot <- coef(dfa, type="matrix")$Z %*% H_inv
+## rotate trends
+fac_rot <- solve(H_inv) %*% dfa$states
+```
+
+## Estimated parameters
+
+Here are plots of the true (solid) and estimated factors (dashed). Note that **MARSS** has no way of ordering the factors, so care should be used when examining them. In this case, the estimated factors have been interchanged.
+
+\vspace{0.15in}
+
+```{r plot_factors, size="small", fig.height=4, fig.width=6, fig.align="center"}
+matplot(cbind(x2,x1,t(fac_rot)), type="l", lty=c(1,1,2,2), col=c("darkblue", "darkred"), lwd=2,
+        ylab="Factors", xlab="Time")
+```
+
+And here is a comparison of the factor loadings in $\mathbf{Z}$.
+
+\vspace{0.15in}
+
+```{r fac_loadings, size="small"}
+## true values
+ZZ
+## estimates
+round(Z_rot[,2:1],2)
+```
+
+## Model fits
+
+Here is a plot of the simulated data (numbers) and the fits (lines) from the estimated DFA model.
+
+\vspace{0.15in}
+
+```{r plot_fits, size="small", fig.height=4, fig.width=6, fig.align="center"}
+## model fits
+yhat <- Z_rot %*% fac_rot + matrix(coef(dfa, type="matrix")$A, nn, tt)
+## plots
+matplot(t(yy), type="p", cex=0.8, col=rainbow(nn,start=0.55, end=0.85),
+        ylab="Observations", xlab="Time")
+matlines(t(yhat), type="l", lty="solid", lwd=2, col=rainbow(nn,start=0.55, end=0.85))
+```
 
