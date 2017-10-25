@@ -3,7 +3,7 @@ output:
   pdf_document:
     highlight: null
 fontsize: 10pt
-geometry: margin=1.5in
+geometry: margin=1.25in
 ---
 
 ```{r setup, include=FALSE}
@@ -19,14 +19,14 @@ knitr::knit_hooks$set(chunk = function(x, options) {
 
 ## Model specification
 
-For this example, we will assume that the observations at time $t$ ($\mathbf{y}_t$) arise from a multivariate Gaussian distribution wherein the mean vector is the sum of a vector of intercepts ($\boldsymbol{\alpha}$) and latent factors ($\mathbf{L} \boldsymbol{\gamma}_t$), and the covariance matrix $\boldsymbol{\Phi}$ is diagonal and unequal. Eqn (1) then becomes:
+For this example we will assume that the observations at time $t$ ($\mathbf{y}_t$) arise from a multivariate normal distribution wherein the mean vector is the sum of a vector of intercepts ($\boldsymbol{\alpha}$) and latent factors ($\mathbf{L} \boldsymbol{\gamma}_t$), and the covariance matrix $\boldsymbol{\Phi}$ is diagonal and unequal. Eqn (1) then becomes:
 
 $$
 \mathbf{y}_t \sim \text{MVN}(\boldsymbol{\alpha} + \mathbf{L} \boldsymbol{\gamma}_t, \boldsymbol{\Phi}).
 $$
 
 
-The latent factors are themselves a multivariate random walk with Gaussian errors. Here we assume $\mathbf{Q}$ equals the identity matrix $\mathbf{I}$, such that Eqn (3) is
+The latent factors are themselves a multivariate random walk with normal errors. Here we assume $\mathbf{Q}$ equals the identity matrix $\mathbf{I}$, such that Eqn (3) is
 
 $$
 \boldsymbol{\gamma}_t \sim \text{MVN}(\boldsymbol{\gamma}_{t-1},\mathbf{Q}).
@@ -34,28 +34,24 @@ $$
 
 ## Simulated data
 
-Here are some simulated data for 5 time series with 30 measurements each based upon 2 latent factors. The observation variances are also unequal. Note that we have aslo subtracted the mean of the data so as to aid in parameter estimation (see below).
+Here are some simulated data for 5 time series with 30 measurements each based upon 2 latent factors. The observation variances are also unequal. We will set the covariance of the process errors $\mathbf{Q}$ to the identity matrix $\mathbf{I}$. Note that we will also subtract the mean of the data so as to aid in parameter estimation (see below). 
 
 \vspace{0.15in}
 
 ```{r sim_data, size="small"}
 set.seed(123)
 ## matrix dims
-nn <- 5
-mm <- 2
-tt <- 30
+nn <- 5; mm <- 2; tt <- 30
 ## zero-mean latent factors
-gamma1 <- cumsum(rnorm(tt))
-gamma1 <- gamma1 - mean(gamma1)
-gamma2 <- cumsum(rnorm(tt))
-gamma2 <- gamma2 - mean(gamma2)
+gamma1 <- cumsum(rnorm(tt)); gamma1 <- gamma1 - mean(gamma1)
+gamma2 <- cumsum(rnorm(tt)); gamma2 <- gamma2 - mean(gamma2)
 ## factor loadings
-Lvals <- c(0.2, 0.9,
-           0.4, 0.7,
-           0.6, 0.5,
-           0.8, 0.3,
-           1.0, 0.1)
-LL <- matrix(Lvals, nn, mm, byrow=TRUE)
+LL <- matrix(c(0.2, 0.9,
+               0.4, 0.7,
+               0.6, 0.5,
+               0.8, 0.3,
+               1.0, 0.1),
+             nn, mm, byrow=TRUE)
 ## covariance matrix for observation errors
 Phi <- diag(seq(1,5)/5)
 ## observation errors
@@ -69,7 +65,7 @@ yy <- t(scale(t(yy), scale=FALSE))
 
 ## Fitting the model
 
-For this example, we make use of the **MARSS** package (Holmes et al. 2012) for **R** to estimate the parameters in the DFA model. The notation of Holmes et al. is somewhat different than ours, however, so we must write out our DFA model in a form based on the following specification of a state-space model:
+There are several options for fitting factor models, but for this example we make use of the **MARSS** package (Holmes et al. 2012) for **R** to estimate the parameters in the DFA model. The notation of Holmes et al. is somewhat different than ours, however, so we must write out our DFA model in a form based on the following specification of a state-space model:
 
 $$
 \begin{gathered}
@@ -80,7 +76,7 @@ $$
 
 Thus, for our DFA model we want $\mathbf{a} = \boldsymbol{\alpha}$, $\mathbf{Z} = \mathbf{L}$ $\mathbf{x}_t = \boldsymbol{\gamma}_t$, $\mathbf{R} = \boldsymbol{\Phi}$, $\mathbf{u} = \mathbf{0}$, and $\mathbf{B} = \mathbf{I}$. Furthermore, because we substracted the mean of each time series, we will set $\mathbf{a} = \mathbf{0}$. Note that this will not affect our estimates of the factors and their loadings.
 
-The `MARSS` function makes use of list matrices, which allow one to mix character and numeric classes within the same matrix. Any values of class `character` are interpreted as parameters to be estimated; anything `numeric` is fixed at its value.
+The `MARSS` function makes use of list matrices, which allow one to mix character and numeric classes within the same matrix. Any entries of class `character` are interpreted as parameters to be estimated; any `numeric` entries are fixed at their value.
 
 \vspace{0.15in}
 
@@ -112,7 +108,7 @@ dfa <- MARSS(yy, model=mod_list, inits=list(x0=matrix(0,2,1)))
 
 ## Factor rotations
 
-For this example we will use a varimax rotation of the factors and loadings, where we seek an $m \times m$ non-singular rotation matrix $\mathbf{H}$, such that the following state-space forms of our DFA models are equivalent:
+For this example we will use a varimax rotation of the factors and loadings, where we seek an $m \times m$ non-singular rotation matrix $\mathbf{H}$, such that the following state-space forms of our DFA model are equivalent ($\mathbf{v}_t$ and $\mathbf{w}_t$ are vectors of observation and process errors, respectively):
 
 $$
 \begin{aligned}
@@ -135,30 +131,34 @@ H_inv <- varimax(L_hat)$rotmat
 ## rotate loadings matrix
 L_rot <- L_hat %*% H_inv
 ## rotate factors
-fac_rot <- solve(H_inv) %*% dfa$states
+gamma_rot <- solve(H_inv) %*% dfa$states
+## model fits
+yhat <- L_rot %*% gamma_rot
 ```
 
 ## Estimated parameters
 
-Here are plots of the true (solid) and estimated factors (dashed). Note that **MARSS** has no way of ordering the factors, so care should be used when examining them. In this case, the estimated factors have been interchanged.
+Here are plots of the true (solid) and estimated factors (dashed). Note that **MARSS** has no way of ordering the factors, so care should be used when examining them. In this case, the estimated factors were interchanged.
 
 \vspace{0.15in}
 
-```{r plot_factors, size="small", fig.height=4, fig.width=6, fig.align="center"}
-matplot(cbind(gamma2,gamma1,t(fac_rot)), type="l", lty=c(1,1,2,2), col=c("darkblue", "darkred"), lwd=2,
-        ylab="Factors", xlab="Time")
+```{r plot_factors, size="small", fig.height=3.5, fig.width=5.5, fig.align="center"}
+matplot(cbind(gamma2,gamma1,t(gamma_rot)), type="l", lty=c(1,1,2,2), lwd=2, 
+        col=c("darkblue", "darkred"), ylab="Factors", xlab="Time")
 ```
 
-And here is a comparison of the factor loadings in $\mathbf{Z}$.
+Here is a comparison of the true factor loadings and the estimates in $\hat{\mathbf{L}}$.
 
 \vspace{0.15in}
 
 ```{r fac_loadings, size="small"}
 ## true values
-L_hat
+LL
 ## estimates
 round(L_rot[,2:1],2)
 ```
+
+It looks like the estimated loadings are generally pretty close to the true values, with the exception of the loading of factor 2 on data series 5. 
 
 ## Model fits
 
@@ -166,12 +166,9 @@ Here is a plot of the simulated data (numbers) and the fits (lines) from the est
 
 \vspace{0.15in}
 
-```{r plot_fits, size="small", fig.height=4, fig.width=6, fig.align="center"}
-## model fits
-yhat <- L_rot %*% fac_rot
-## plots
+```{r plot_fits, size="small", fig.height=3.5, fig.width=5.5, fig.align="center"}
 matplot(t(yy), type="p", cex=0.8, col=rainbow(nn,start=0.55, end=0.85),
         ylab="Observations", xlab="Time")
-matlines(t(yhat), type="l", lty="solid", lwd=2, col=rainbow(nn,start=0.55, end=0.85))
+matlines(t(yhat), type="l", lty=1, lwd=2, col=rainbow(nn,start=0.55, end=0.85))
 ```
 
