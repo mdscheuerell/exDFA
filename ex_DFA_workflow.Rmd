@@ -1,5 +1,9 @@
 ---
-output: pdf_document
+output:
+  pdf_document:
+    highlight: null
+fontsize: 10pt
+geometry: margin=1.5in
 ---
 
 ```{r setup, include=FALSE}
@@ -30,7 +34,7 @@ $$
 
 ## Simulated data
 
-Here are some simulated data for 5 time series with 30 measurements each based upon 2 latent factors. The observation variances are also unequal.
+Here are some simulated data for 5 time series with 30 measurements each based upon 2 latent factors. The observation variances are also unequal. Note that we have aslo subtracted the mean of the data so as to aid in parameter estimation (see below).
 
 \vspace{0.15in}
 
@@ -41,24 +45,24 @@ nn <- 5
 mm <- 2
 tt <- 30
 ## zero-mean latent factors
-x1 <- cumsum(rnorm(tt, 0, 1))
-x1 <- x1 - mean(x1)
-x2 <- cumsum(rnorm(tt, 0, 1))
-x2 <- x2 - mean(x2)
+gamma1 <- cumsum(rnorm(tt))
+gamma1 <- gamma1 - mean(gamma1)
+gamma2 <- cumsum(rnorm(tt))
+gamma2 <- gamma2 - mean(gamma2)
 ## factor loadings
-zvals <- c(0.2, 0.9,
+Lvals <- c(0.2, 0.9,
            0.4, 0.7,
            0.6, 0.5,
            0.8, 0.3,
            1.0, 0.1)
-ZZ <- matrix(zvals, nn, mm, byrow=TRUE)
+LL <- matrix(Lvals, nn, mm, byrow=TRUE)
 ## covariance matrix for observation errors
-RR <- diag(seq(1,5)/5)
+Phi <- diag(seq(1,5)/5)
 ## observation errors
-vv <- t(MASS::mvrnorm(tt, matrix(0,nn,1), RR))
+vv <- t(MASS::mvrnorm(tt, matrix(0,nn,1), Phi))
 ## simulated data
-yy <- ZZ %*% rbind(x1,x2) + vv
-## subtract mean
+yy <- LL %*% rbind(gamma1,gamma2) + vv
+## zero-mean data
 yy <- t(scale(t(yy), scale=FALSE))
 ```
 
@@ -70,11 +74,11 @@ For this example, we make use of the **MARSS** package (Holmes et al. 2012) for 
 $$
 \begin{gathered}
 \mathbf{y}_t \sim \text{MVN}(\mathbf{a} + \mathbf{Z} \mathbf{x}_t, \mathbf{R}) \\
-\mathbf{x}_t \sim \text{MVN}(\mathbf{u} + \mathbf{B} \mathbf{x}_{t-1}, \mathbf{Q})
- \end{gathered}.   
+\mathbf{x}_t \sim \text{MVN}(\mathbf{u} + \mathbf{B} \mathbf{x}_{t-1}, \mathbf{Q}).
+ \end{gathered}   
 $$
 
-Thus, we will need to define $\mathbf{a} = \boldsymbol{\alpha}$, $\boldsymbol{\gamma}_t = \mathbf{x}_t$, $\boldsymbol{\Phi} = \mathbf{R}$, $\mathbf{u} = \mathbf{0}$, and $\mathbf{B} = \mathbf{I}$. Furthermore, estimating the mean vector $\mathbf{a}$ is often difficult, so we will instead substract the mean from the data before fitting and set $\mathbf{a} = \mathbf{0}$. Note that this will not affect our estimates of the factors and their loadings.
+Thus, for our DFA model we want $\mathbf{a} = \boldsymbol{\alpha}$, $\mathbf{Z} = \mathbf{L}$ $\mathbf{x}_t = \boldsymbol{\gamma}_t$, $\mathbf{R} = \boldsymbol{\Phi}$, $\mathbf{u} = \mathbf{0}$, and $\mathbf{B} = \mathbf{I}$. Furthermore, because we substracted the mean of each time series, we will set $\mathbf{a} = \mathbf{0}$. Note that this will not affect our estimates of the factors and their loadings.
 
 The `MARSS` function makes use of list matrices, which allow one to mix character and numeric classes within the same matrix. Any values of class `character` are interpreted as parameters to be estimated; anything `numeric` is fixed at its value.
 
@@ -111,19 +115,12 @@ dfa <- MARSS(yy, model=mod_list, inits=list(x0=matrix(0,2,1)))
 For this example we will use a varimax rotation of the factors and loadings, where we seek an $m \times m$ non-singular rotation matrix $\mathbf{H}$, such that the following state-space forms of our DFA models are equivalent:
 
 $$
-\begin{gathered}
- \mathbf{y}_t = \mathbf{L} \boldsymbol{\gamma}_t + \boldsymbol{\alpha} +\mathbf{v}_t \\
+\begin{aligned}
+ \mathbf{y}_t = \mathbf{L} \boldsymbol{\gamma}_t + \boldsymbol{\alpha} +\mathbf{v}_t
+ &\Leftrightarrow \mathbf{y}_t = \mathbf{L}\mathbf{H}^{-1} \boldsymbol{\gamma}_t + \boldsymbol{\alpha} + \mathbf{v}_t \\
  \boldsymbol{\gamma}_t = \boldsymbol{\gamma}_{t-1} + \mathbf{w}_t
-\end{gathered}   
-$$
-
-and
-
-$$
-\begin{gathered}
- \mathbf{y}_t = \mathbf{L}\mathbf{H}^{-1} \boldsymbol{\gamma}_t + \boldsymbol{\alpha} + \mathbf{v}_t \\
- \mathbf{H} \boldsymbol{\gamma}_t = \mathbf{H} \boldsymbol{\gamma}_{t-1} + \mathbf{H} \mathbf{w}_t
-\end{gathered}.
+ &\Leftrightarrow \mathbf{H} \boldsymbol{\gamma}_t = \mathbf{H} \boldsymbol{\gamma}_{t-1} + \mathbf{H} \mathbf{w}_t.
+\end{aligned}
 $$
 
 This is easily done in **R** via the `varimax` function:
@@ -131,11 +128,13 @@ This is easily done in **R** via the `varimax` function:
 \vspace{0.15in}
 
 ```{r varimax, size="small"}
+## loadings matrix
+L_hat <- coef(dfa, type="matrix")$Z
 ## inverse of the rotation matrix
-H_inv <- varimax(coef(dfa, type="matrix")$Z)$rotmat
-## rotate factor loadings
-Z_rot <- coef(dfa, type="matrix")$Z %*% H_inv
-## rotate trends
+H_inv <- varimax(L_hat)$rotmat
+## rotate loadings matrix
+L_rot <- L_hat %*% H_inv
+## rotate factors
 fac_rot <- solve(H_inv) %*% dfa$states
 ```
 
@@ -146,7 +145,7 @@ Here are plots of the true (solid) and estimated factors (dashed). Note that **M
 \vspace{0.15in}
 
 ```{r plot_factors, size="small", fig.height=4, fig.width=6, fig.align="center"}
-matplot(cbind(x2,x1,t(fac_rot)), type="l", lty=c(1,1,2,2), col=c("darkblue", "darkred"), lwd=2,
+matplot(cbind(gamma2,gamma1,t(fac_rot)), type="l", lty=c(1,1,2,2), col=c("darkblue", "darkred"), lwd=2,
         ylab="Factors", xlab="Time")
 ```
 
@@ -156,9 +155,9 @@ And here is a comparison of the factor loadings in $\mathbf{Z}$.
 
 ```{r fac_loadings, size="small"}
 ## true values
-ZZ
+L_hat
 ## estimates
-round(Z_rot[,2:1],2)
+round(L_rot[,2:1],2)
 ```
 
 ## Model fits
@@ -169,7 +168,7 @@ Here is a plot of the simulated data (numbers) and the fits (lines) from the est
 
 ```{r plot_fits, size="small", fig.height=4, fig.width=6, fig.align="center"}
 ## model fits
-yhat <- Z_rot %*% fac_rot + matrix(coef(dfa, type="matrix")$A, nn, tt)
+yhat <- L_rot %*% fac_rot
 ## plots
 matplot(t(yy), type="p", cex=0.8, col=rainbow(nn,start=0.55, end=0.85),
         ylab="Observations", xlab="Time")
